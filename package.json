@@ -1,0 +1,15 @@
+{
+  "name": "fn",
+  "version": "1.0.0",
+  "description": "fn",
+  "author": "Oleksii Khilkevych <oleksiy@noroutine.me>",
+  "license": "MIT",
+  "repository": "github:noroutine/fn",
+  "type": "module",
+  "main": "server.js",
+  "packageManager": "yarn@4.4.0",
+  "dependencies": {
+    "express": "^4.19.2",
+    "glob": "^11.0.0"
+  }
+}
