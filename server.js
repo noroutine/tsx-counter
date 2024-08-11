@@ -1,10 +1,49 @@
-import util from 'util';
 import express from 'express';
-
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import morgan from 'morgan';
 import { glob } from 'glob';
 import path from 'path';
 
+import { configDotenv } from 'dotenv';
+configDotenv({ path: ['.env', '.env.local'] });
+
 const app = express();
+
+app.use(morgan('dev'));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+var fnRoutes = []
+
+var unlessFunction = function (middleware) {
+    return function (req, res, next) {
+        if (fnRoutes.includes(req.path)) {
+            return next();
+        } else {
+            return middleware(req, res, next);
+        }
+    };
+};
+
+const yes = /^(1|true|yes|on)$/i;
+
+const FALLBACK_UPSTREAM = process.env.FALLBACK_UPSTREAM || null;
+const FALLBACK_UPSTREAM_INDEX_PATH_REWRITE = yes.test(process.env.FALLBACK_UPSTREAM_INDEX_PATH_REWRITE) ? { '/$': '/index.html' } : undefined;
+
+if (FALLBACK_UPSTREAM) {
+    console.log(`Using fallback upstream: ${FALLBACK_UPSTREAM}, index path rewrite: ${FALLBACK_UPSTREAM_INDEX_PATH_REWRITE ? 'enabled' : 'disabled'}`);
+    
+    app.use(unlessFunction(
+        createProxyMiddleware(
+            {
+                target: process.env.FALLBACK_UPSTREAM,
+                changeOrigin: true,
+                pathRewrite: FALLBACK_UPSTREAM_INDEX_PATH_REWRITE
+            }
+        )
+    ));
+}
+
 const port = process.env.PORT || 3000;
 
 async function loadRoutesFromFile(app, file) {
@@ -21,11 +60,9 @@ async function loadRoutesFromFile(app, file) {
                 route = route.replace(/\/(main|index)$/, '/');
             }
 
-            app.all(route, (req, res) => {
-                console.log(`${req.method} ${req.url} ${util.inspect(req.headers, { colors: true })}`);
-                return value(req, res);
-            });
+            app.all(route, value);
 
+            fnRoutes.push(route);
             console.log(`  ✅ installed ${route} => ${key}`);
         } else {
             console.log(`     ignored ${key} [${typeof value}]`);
@@ -67,11 +104,11 @@ function shutDown() {
         process.exit(1);
     }, 10000);
 
-    console.log(`${connections} connections currently open`)
+    console.log(`${connections.length} connections currently open`)
     connections.forEach(curr => curr.end());
     setTimeout(() => connections.forEach(curr => curr.destroy()), 5000);
 }
 
-export function index(req, res) {
-    res.send('index from server.js');
-}
+// export function index(req, res) {
+//     res.send('index from server.js');
+// }

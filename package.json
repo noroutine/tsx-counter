@@ -9,7 +9,10 @@
   "main": "server.js",
   "packageManager": "yarn@4.4.0",
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "glob": "^11.0.0"
+    "glob": "^11.0.0",
+    "http-proxy-middleware": "^3.0.0",
+    "morgan": "^1.10.0"
   }
 }
