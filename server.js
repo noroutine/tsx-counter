@@ -1,3 +1,11 @@
+// instead of --loader ./https-loader.mjs
+// use `register()`:
+// --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("%40node-loader/http", pathToFileURL("./"));'
+
+import { register } from "node:module";
+import { pathToFileURL } from "node:url";
+register("./https-loader.mjs", pathToFileURL("./"));
+
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import morgan from 'morgan';
@@ -5,6 +13,7 @@ import { glob } from 'glob';
 import path from 'path';
 
 import { configDotenv } from 'dotenv';
+import { assert } from "node:console";
 configDotenv({ path: ['.env', '.env.local'] });
 
 const app = express();
@@ -32,7 +41,7 @@ const FALLBACK_UPSTREAM_INDEX_PATH_REWRITE = yes.test(process.env.FALLBACK_UPSTR
 
 if (FALLBACK_UPSTREAM) {
     console.log(`Using fallback upstream: ${FALLBACK_UPSTREAM}, index path rewrite: ${FALLBACK_UPSTREAM_INDEX_PATH_REWRITE ? 'enabled' : 'disabled'}`);
-    
+
     app.use(unlessFunction(
         createProxyMiddleware(
             {
@@ -46,37 +55,113 @@ if (FALLBACK_UPSTREAM) {
 
 const port = process.env.PORT || 3000;
 
-async function loadRoutesFromFile(app, file) {
-    var mod = await import(path.resolve(file))
-    console.log(`Importing ${file}`);
+async function loadRoutesFromLocation(app, location, at, routeMapper) {
+    console.log(`Importing ${location}`);
+    var mod = await import(location)
     Object.entries(mod).forEach(([key, value]) => {
         console.log(`  ...checking ${key} [${typeof value}]`);
         if (typeof value === 'function') {
             // construct the route to function
-            var route = `/${path.dirname(file)}/${key}`.replace(/^\/\.\//, '/');
+            var route = `${at}${routeMapper(location, key)}`
 
-            // handle main and index functino specially
-            if (key == "main" || key == "index") {
-                route = route.replace(/\/(main|index)$/, '/');
-            }
+            // hack // to /
+            route = route.replace(/\/+/, '/');
 
             app.all(route, value);
 
             fnRoutes.push(route);
-            console.log(`  ✅ installed ${route} => ${key}`);
+            console.log(`  ✅ installed ${key}@${location} as ${route}`);
         } else {
             console.log(`     ignored ${key} [${typeof value}]`);
         }
     });
 }
 
+function routeMapperFn (location, key) {
+    // hack https://raw.githubusercontent.com/noroutine/fn/master to ./
+    var here = location.replace(/^https:\/\/raw.githubusercontent.com\/noroutine\/fn\/master/, '.');
+    
+    var route = `/${path.dirname(here)}/${key}`
 
-const server = app.listen(port, async () => {
-    for (const file of glob.sync('./**/*.js', { ignore: "./node_modules/**" })) {
-        await loadRoutesFromFile(app, file)
+    // hack /./ to /
+    route = route.replace(/\/\.\//, '/');
+
+    // hack // to /
+    route = route.replace(/\/+/, '/');
+
+    // handle main and index functino specially
+    if (key == "main" || key == "index") {
+        route = route.replace(/\/(main|index)$/, '/');
     }
-    console.log(`\n🚀 All routes loaded and Fn is listening on port ${port}\n`);
-})
+
+    return route;
+}
+
+// Some testing of routeMapperFn
+assert(routeMapperFn('./api/a/fn.js', 'main') === '/api/a/', 'routeMapperFn failed');
+assert(routeMapperFn('./api/b/fn.js', 'index') === '/api/b/', 'routeMapperFn failed');
+assert(routeMapperFn('./api/index.js', 'index') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('./api/fn.js', 'main') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('./api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('./api/a/fn.js', 'fn1') === '/api/a/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('./api/b/fn.js', 'fn1') === '/api/b/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('./api/index.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('./api/fn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('./api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+
+assert(routeMapperFn('/api/a/fn.js', 'main') === '/api/a/', 'routeMapperFn failed');
+assert(routeMapperFn('/api/b/fn.js', 'index') === '/api/b/', 'routeMapperFn failed');
+assert(routeMapperFn('/api/index.js', 'index') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('/api/fn.js', 'main') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('/api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('/api/a/fn.js', 'fn1') === '/api/a/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('/api/b/fn.js', 'fn1') === '/api/b/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('/api/index.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('/api/fn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('/api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+
+assert(routeMapperFn('api/a/fn.js', 'main') === '/api/a/', 'routeMapperFn failed');
+assert(routeMapperFn('api/b/fn.js', 'index') === '/api/b/', 'routeMapperFn failed');
+assert(routeMapperFn('api/index.js', 'index') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('api/fn.js', 'main') === '/api/', 'routeMapperFn failed');
+assert(routeMapperFn('api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('api/a/fn.js', 'fn1') === '/api/a/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('api/b/fn.js', 'fn1') === '/api/b/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('api/index.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('api/fn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+assert(routeMapperFn('api/nofn.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+
+
+assert(routeMapperFn('https://raw.githubusercontent.com/noroutine/fn/master/api/index.js', 'fn1') === '/api/fn1', 'routeMapperFn failed');
+
+console.log(`\n👉 Loading functions from local filesystem\n`)
+
+var localLocations = glob.sync('./api/**/*.js', { ignore: "./node_modules/**" }) 
+
+for (const localLocation of localLocations) {
+    await loadRoutesFromLocation(app, `./${localLocation}`, '/local', routeMapperFn)
+}
+console.log(`\n🎉 All routes from filesystem are loaded\n`);
+
+console.log(`\n👉 Loading functions from remote locations\n`)
+
+var httpLocations = [
+    "https://raw.githubusercontent.com/noroutine/fn/master/api/index.js",
+    "https://raw.githubusercontent.com/noroutine/fn/master/api/a/fn.js",
+    "https://raw.githubusercontent.com/noroutine/fn/master/api/a/b/fn.js",
+    "https://raw.githubusercontent.com/noroutine/fn/master/api/fn.js",
+    "https://raw.githubusercontent.com/noroutine/fn/master/api/nofn.js",
+]
+
+for (const remoteLocation of httpLocations) {
+    await loadRoutesFromLocation(app, remoteLocation, '/remote', routeMapperFn)
+}
+
+console.log(`\n🎉 All remote routes are loaded\n`);
+
+const server = app.listen(port, () => {
+    console.log(`\n🚀 Fn is listening on port ${port}\n`);
+});
 
 let connections = [];
 
