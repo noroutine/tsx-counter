@@ -1,0 +1,43 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: fn
+build:
+  artifacts:
+    - image: cr.nrtn.dev/sandbox/fn
+      buildpacks:
+        builder: "cr.nrtn.dev/infra/buildpacks:v0.0.349"
+  #     docker:
+  #       dockerfile: Dockerfile
+  # local:
+  #   useDockerCLI: true
+  #   useBuildkit: true
+  #   concurrency: 3
+manifests:
+  rawYaml:
+    - deployment.yaml
+
+deploy:
+  helm:
+    releases:
+      - name: redis
+        remoteChart: redis
+        repo: https://fs.noroutine.me/attic/infra/v0.0.349/charts/bitnami/
+        # version: 20.0.1
+        setValues:
+          image:
+            registry: cr.nrtn.dev
+            repository: infra/bitnami-redis
+            tag: v0.0.349
+          architecture: standalone
+          auth:
+            enabled: false
+          master:
+            persistence:
+              enabled: false
+          replica:
+            replicaCount: 0
+portForward:
+  - resourceType: service
+    resourceName: fn
+    port: 3000
